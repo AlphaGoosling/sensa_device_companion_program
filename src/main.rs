@@ -57,14 +57,13 @@ fn main() {
         // If port connects successfully
         Ok(mut port) => {
             println!("Connected to SENSA device\r");
-            println!("Please enter command \"start\" to start recording the sensor data to a file\r");
             // Buffer for serial data after reading it from the port
             let mut serial_buf: Vec<u8> = vec![0; 1000];
-
+            // Buffer for accumulating 
             let mut received_data = Vec::new();
             println!("Receiving data on port {} at {} baud:\r", &port_name, &baud_rate);
+            println!("Please enter command \"start\" to start recording the sensor data to a file\r");
 
-            let mut first_read = true;
             loop {
                 match port.read(serial_buf.as_mut_slice()) {
                     Ok(t) => {
@@ -85,29 +84,34 @@ fn main() {
                     }
                 }
 
-                if received_data.contains(&b'-') {
-                    let mut data_string: Vec<u8> = received_data.splice(..1+received_data.iter()
-                                                                .position(|&x| x == b'-')
-                                                                .unwrap(), [])
-                                                                .collect();
-                    if first_read{data_string.clear(); first_read = false; continue;}
-                    let data_instance = format!("{},{}", Local::now().format("%H:%M:%S"), data_string.iter_mut()
-                                                                                                          .map(|x| char::from(*x))
-                                                                                                          .collect::<String>()
-                                                                                                          .replace(">", "")
-                                                                                                          .replace(" MQ3 : ", "")
-                                                                                                          .replace(" MQ5 : ", "")
-                                                                                                          .replace(" MQ131 : ", "")
-                                                                                                          .replace(" MQ135 : ", "")
-                                                                                                          .replace(" MP503 : ", "")
-                                                                                                          .replace(" Temperature : ", "")
-                                                                                                          .replace(" Humidity : ", "")
-                                                                                                          .replace("-", ""));
-                    data_string.clear();
-                    if recording {
-                        file.write_all(data_instance.as_bytes()).unwrap();
-                        file.flush().unwrap();
+                if received_data.contains(&b'-') && received_data.contains(&b'_'){
+                    let start = received_data.iter().position(|&x| x == b'-').unwrap();
+                    let end = received_data.iter().position(|&x| x == b'_').unwrap();
+                    if start > end {
+                        let _ = received_data.splice(..start, []);
                     }
+                    else {
+                        let mut data_extract: Vec<u8> = received_data.splice(start..1 + end , []).collect();
+
+                        let data_instance = format!("{},{}", Local::now().format("%H:%M:%S"), data_extract.iter_mut()
+                                                                                                            .map(|x| char::from(*x))
+                                                                                                            .collect::<String>()
+                                                                                                            .replace("->", "")
+                                                                                                            .replace(" MQ3 : ", "")
+                                                                                                            .replace(" MQ5 : ", "")
+                                                                                                            .replace(" MQ131 : ", "")
+                                                                                                            .replace(" MQ135 : ", "")
+                                                                                                            .replace(" MP503 : ", "")
+                                                                                                            .replace(" Temperature : ", "")
+                                                                                                            .replace(" Humidity : ", "")
+                                                                                                            .replace("_", "\n"));
+                        data_extract.clear();
+                        if recording {
+                            file.write_all(data_instance.as_bytes()).unwrap();
+                            file.flush().unwrap();
+                        }
+                    }
+                    
                 }
                 
                 process_commands(&mut command_buf, &mut recording, &mut file, port.as_mut());
@@ -124,8 +128,7 @@ fn main() {
 
 fn process_commands(command: &mut String, recording: &mut bool, file: &mut File, port: &mut dyn SerialPort) -> () {
     if poll(Duration::from_millis(1)).unwrap(){
-        // It's guaranteed that `read` won't block, because `poll` returned
-        // `Ok(true)`
+        // It's guaranteed that `read` won't block, because to reach this point `poll` had to have returned Ok(true)
         let event = read().unwrap();
         if let Key(KeyEvent {code,..}) = event {
             if let KeyCode::Char(x) = code {
@@ -137,7 +140,7 @@ fn process_commands(command: &mut String, recording: &mut bool, file: &mut File,
                 if code == KeyCode::Enter {
                     if command.trim() == "start".to_string() {
                         if !*recording {
-                            println!("Creating file\n\rStarting to record\n\rTo end the recording session, please use the \"stop\" command \n\r");
+                            println!("Creating file\n\rStarting to record\n\rTo end the recording session, please use the \"stop\" command\r");
                             let file_name = format!("Session {} .csv", Local::now().format("%d-%m-%Y %H-%M-%S"));
                             *file = File::create(file_name).unwrap();
                             file.write_all(b"Time,MQ3,MQ5,MQ131,MQ135,MP503,Temperature,Humidity\n").unwrap();
@@ -150,7 +153,7 @@ fn process_commands(command: &mut String, recording: &mut bool, file: &mut File,
                     }
                     else if command.trim() == "stop".to_string() {
                         if *recording {
-                            println!("Ending the recording session\n\r");
+                            println!("Ending the recording session\r");
                             *recording = false;
                         } else {
                             println!("There is no recording session in progress\r");
@@ -180,7 +183,7 @@ fn draw_commands_field(command: &mut String) {
     queue!(io::stdout(), Print(command)).unwrap();
     queue!(io::stdout(), cursor::MoveTo(0, 1)).unwrap();
     queue!(io::stdout(), Clear(ClearType::CurrentLine)).unwrap();
-    queue!(io::stdout(), Print("=========================================================================================================")).unwrap();
+    queue!(io::stdout(), Print("==========================================================================================================")).unwrap();
     queue!(io::stdout(), cursor::RestorePosition).unwrap();
     io::stdout().flush().unwrap();
 }
